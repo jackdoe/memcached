@@ -372,6 +372,7 @@ int do_item_replace(item *it, item *new_it, const uint32_t hv) {
     MEMCACHED_ITEM_REPLACE(ITEM_key(it), it->nkey, it->nbytes,
                            ITEM_key(new_it), new_it->nkey, new_it->nbytes);
     assert((it->it_flags & ITEM_SLABBED) == 0);
+
     do_item_unlink(it, hv);
     return do_item_link(new_it, hv);
 }
@@ -569,16 +570,17 @@ item *do_item_get(const char *key, const size_t nkey, const uint32_t hv) {
         } else {
             it->it_flags |= ITEM_FETCHED;
             DEBUG_REFCNT(it, '+');
-            if (settings.anti_stampede > 0 && !(it->it_flags & ITEM_FAKE_MISSED) && it->exptime != 0) {
-                int chance = rand() % settings.anti_stampede;
-                if (it->exptime > chance && it->exptime <= current_time + chance) {
-                    it->it_flags |= ITEM_FAKE_MISSED;
-                    if (settings.verbose > 2)
-                        fprintf(stderr," - FAKE MISS (stampede protection)");
+            if (settings.anti_stampede > 0 && !(it->it_flags & ITEM_FAKE_MISSED)
+                && it->exptime != 0
+                && it->exptime < current_time + settings.anti_stampede
+                && it->exptime <= current_time + rand() % settings.anti_stampede) {
 
-                    refcount_decr(&it->refcount);
-                    it = NULL;
-                }
+                it->it_flags |= ITEM_FAKE_MISSED;
+                if (settings.verbose > 2)
+                    fprintf(stderr," - FAKE MISS (stampede protection)");
+
+                refcount_decr(&it->refcount);
+                it = NULL;
             }
         }
     }
